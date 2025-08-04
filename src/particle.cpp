@@ -145,6 +145,8 @@ void Particle::from_source(const SourceSite* src)
     E() = data::mg.energy_bin_avg_[g()];
   }
   E_last() = E();
+  // NEW: birth energy — for primaries we default to the kinetic energy at creation.
+  E_born() = E();
   time() = src->time;
   time_last() = src->time;
   parent_nuclide() = src->parent_nuclide;
@@ -981,6 +983,7 @@ void add_surf_source_to_bank(Particle& p, const Surface& surf)
   site.r = p.r();
   site.u = p.u();
   site.E = p.E();
+  site.E_born = p.E_born(); // NEW
   site.time = p.time();
   site.wgt = p.wgt();
   site.delayed_group = p.delayed_group();

@@ -44,6 +44,7 @@ struct SourceSite {
   Position r;
   Direction u;
   double E;
+  double E_born {0.0};   // NEW: birth energy [eV]
   double time {0.0};
   double wgt {1.0};
   int delayed_group {0};
@@ -472,6 +473,7 @@ private:
 
   double E_;
   double E_last_;
+  double E_born_ {0.0};  // NEW: birth energy in [eV]
   int g_ {0};
   int g_last_;
 
@@ -574,6 +576,8 @@ public:
   const double& E() const { return E_; }
   double& E_last() { return E_last_; }
   const double& E_last() const { return E_last_; }
+  double& E_born() { return E_born_; }     // Birth energy accessors (NEW)
+  const double& E_born() const { return E_born_; }
   int& g() { return g_; }
   const int& g() const { return g_; }
   int& g_last() { return g_last_; }
