@@ -19,6 +19,7 @@
 #include "openmc/tallies/filter_delayedgroup.h"
 #include "openmc/tallies/filter_distribcell.h"
 #include "openmc/tallies/filter_energy.h"
+#include "openmc/tallies/filter_energyborn.h"
 #include "openmc/tallies/filter_energyfunc.h"
 #include "openmc/tallies/filter_legendre.h"
 #include "openmc/tallies/filter_material.h"
@@ -120,6 +121,8 @@ Filter* Filter::create(const std::string& type, int32_t id)
     return Filter::create<EnergyFunctionFilter>(id);
   } else if (type == "energy") {
     return Filter::create<EnergyFilter>(id);
+  } else if (type == "energyborn") {       // <-- new
+    return Filter::create<EnergyBornFilter>(id);
   } else if (type == "collision") {
     return Filter::create<CollisionFilter>(id);
   } else if (type == "energyout") {

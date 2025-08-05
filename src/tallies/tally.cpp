@@ -24,6 +24,7 @@
 #include "openmc/tallies/filter_collision.h"
 #include "openmc/tallies/filter_delayedgroup.h"
 #include "openmc/tallies/filter_energy.h"
+#include "openmc/tallies/filter_energyborn.h"
 #include "openmc/tallies/filter_legendre.h"
 #include "openmc/tallies/filter_mesh.h"
 #include "openmc/tallies/filter_meshborn.h"

@@ -22,7 +22,7 @@ from ._xml import get_text
 
 _FILTER_TYPES = (
     'universe', 'material', 'cell', 'cellborn', 'surface', 'mesh', 'energy',
-    'energyout', 'mu', 'musurface', 'polar', 'azimuthal', 'distribcell', 'delayedgroup',
+    'energyout', 'energyborn', 'mu', 'musurface', 'polar', 'azimuthal', 'distribcell', 'delayedgroup',
     'energyfunction', 'cellfrom', 'materialfrom', 'legendre', 'spatiallegendre',
     'sphericalharmonics', 'zernike', 'zernikeradial', 'particle', 'cellinstance',
     'collision', 'time', 'parentnuclide', 'weight', 'meshborn', 'meshsurface',
@@ -1666,6 +1666,114 @@ class EnergyFilter(RealFilter):
         cv.check_value('group_structure', group_structure, openmc.mgxs.GROUP_STRUCTURES.keys())
         return cls(openmc.mgxs.GROUP_STRUCTURES[group_structure.upper()])
 
+class EnergyBornFilter(RealFilter):
+    """Bins tally events based on born particle energy.
+
+    Parameters
+    ----------
+    values : Iterable of Real
+        A list of values for which each successive pair constitutes a range of
+        energies in [eV] for a single bin. Entries must be positive and ascending.
+    filter_id : int
+        Unique identifier for the filter
+
+    Attributes
+    ----------
+    values : numpy.ndarray
+        An array of values for which each successive pair constitutes a range of
+        energies in [eV] for a single bin
+    id : int
+        Unique identifier for the filter
+    bins : numpy.ndarray
+        An array of shape (N, 2) where each row is a pair of energies in [eV]
+        for a single filter bin
+    num_bins : int
+        The number of filter bins
+
+    """
+    units = 'eV'
+
+    def __init__(self, values, filter_id=None):
+        cv.check_length('values', values, 2)
+        super().__init__(values, filter_id)
+
+    def get_bin_index(self, filter_bin):
+        # Use lower energy bound to find index for RealFilters
+        deltas = np.abs(self.bins[:, 1] - filter_bin[1]) / filter_bin[1]
+        min_delta = np.min(deltas)
+        if min_delta < 1E-3:
+            return deltas.argmin()
+        else:
+            msg = ('Unable to get the bin index for Filter since '
+                   f'"{filter_bin}" is not one of the bins')
+            raise ValueError(msg)
+
+    def check_bins(self, bins):
+        super().check_bins(bins)
+        for v0, v1 in bins:
+            cv.check_greater_than('filter value', v0, 0., equality=True)
+            cv.check_greater_than('filter value', v1, 0., equality=True)
+
+    def get_tabular(self, values, **kwargs):
+        """Create a tabulated distribution based on tally results with an energy filter
+
+        This method provides an easy way to create a distribution in energy
+        (e.g., a source spectrum) based on tally results that were obtained from
+        using an :class:`~openmc.EnergyFilter`.
+
+        .. versionadded:: 0.13.3
+
+        Parameters
+        ----------
+        values : iterable of float
+            Array of numeric values, typically from a tally result
+        **kwargs
+            Keyword arguments passed to :class:`openmc.stats.Tabular`
+
+        Returns
+        -------
+        openmc.stats.Tabular
+            Tabular distribution with histogram interpolation
+        """
+
+        probabilities = np.array(values, dtype=float)
+        probabilities /= probabilities.sum()
+
+        # Determine probability per eV, adding extra 0 at the end since it is a histogram
+        probability_per_ev = probabilities / np.diff(self.values)
+        probability_per_ev = np.append(probability_per_ev, 0.0)
+
+        kwargs.setdefault('interpolation', 'histogram')
+        return openmc.stats.Tabular(self.values, probability_per_ev, **kwargs)
+
+    @property
+    def lethargy_bin_width(self):
+        """Calculates the base 10 log width of energy bins which is useful when
+        plotting the normalized flux.
+
+        Returns
+        -------
+        numpy.array
+            Array of bin widths
+        """
+        return np.log10(self.bins[:, 1]/self.bins[:, 0])
+
+    @classmethod
+    def from_group_structure(cls, group_structure):
+        """Construct an EnergyFilter instance from a standard group structure.
+
+        .. versionadded:: 0.13.1
+
+        Parameters
+        ----------
+        group_structure : str
+            Name of the group structure. Must be a valid key of
+            openmc.mgxs.GROUP_STRUCTURES dictionary.
+
+        """
+
+        cv.check_value('group_structure', group_structure, openmc.mgxs.GROUP_STRUCTURES.keys())
+        return cls(openmc.mgxs.GROUP_STRUCTURES[group_structure.upper()])
 
 class EnergyoutFilter(EnergyFilter):
     """Bins tally events based on outgoing particle energy.
