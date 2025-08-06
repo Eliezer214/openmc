@@ -45,6 +45,7 @@ enum class FilterType {
   SPATIAL_LEGENDRE,
   SURFACE,
   TIME,
+  TOFENERGYRATIO,
   UNIVERSE,
   WEIGHT,
   ZERNIKE,

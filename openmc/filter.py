@@ -2639,3 +2639,45 @@ class WeightFilter(RealFilter):
     values : numpy.ndarray
         Array of weight boundaries
     """
+
+class TofEnergyRatioFilter(RealFilter):
+    """
+    Bins the relative difference between a particle's actual energy and
+    the expected energy computed from time-of-flight at a user-specified distance.
+
+    Parameters
+    ----------
+    values : iterable of float
+        Bin edges for the mismatch between actual and expected energy.
+    distance : float
+        The expected flight path (distance) [in cm or as appropriate].
+    filter_id : int, optional
+        Unique identifier for the filter
+    """
+    def __init__(self, values, distance, filter_id=None):
+        super().__init__(values, filter_id)
+        self.distance = float(distance)
+
+    def to_xml_element(self):
+        element = super().to_xml_element()
+        distance_elem = ET.SubElement(element, 'distance')
+        distance_elem.text = str(self.distance)
+        return element
+
+    @classmethod
+    def from_xml_element(cls, elem, **kwargs):
+        filter_id = int(elem.get('id'))
+        bins = [float(x) for x in get_text(elem, 'bins').split()]
+        distance = float(get_text(elem, 'distance'))
+        return cls(bins, distance, filter_id=filter_id)
+    
+    @classmethod
+    def from_hdf5(cls, group, **kwargs):
+        bins = group['bins'][()]
+        if 'distance' in group:
+            distance = group['distance'][()]
+        else:
+            raise ValueError("TofEnergyRatioFilter requires 'distance' in statepoint file.")
+        filter_id = int(group.name.split('/')[-1].lstrip('filter '))
+        return cls(bins, distance, filter_id=filter_id)
+
