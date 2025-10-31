@@ -412,6 +412,7 @@ class Settings:
         self._use_decay_photons = None
 
         self._random_ray = {}
+        self._forced_collision = {}  # New
 
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -1184,6 +1185,37 @@ class Settings:
         self._random_ray = random_ray
 
     @property
+    def forced_collision(self) -> dict:
+        return self._forced_collision
+
+    @forced_collision.setter
+    def forced_collision(self, fc: dict):
+        # Validate type
+        cv.check_type("forced_collision", fc, Mapping)
+
+        # Allowed keys
+        for key in fc:
+            cv.check_value("forced_collision key", key, ("cells", "max_split", "min_weight"))
+
+        # cells: list[int] > 0
+        if "cells" in fc:
+            cv.check_type("forced_collision cells", fc["cells"], Iterable, Integral)
+            for cid in fc["cells"]:
+                cv.check_greater_than("forced_collision cell id", cid, 0)
+
+        # max_split: int >= 1
+        if "max_split" in fc:
+            cv.check_type("forced_collision max_split", fc["max_split"], Integral)
+            cv.check_greater_than("forced_collision max_split", fc["max_split"], 0)
+
+        # min_weight: float > 0.0
+        if "min_weight" in fc:
+            cv.check_type("forced_collision min_weight", fc["min_weight"], Real)
+            cv.check_greater_than("forced_collision min_weight", fc["min_weight"], 0.0)
+
+        self._forced_collision = fc
+
+    @property
     def use_decay_photons(self) -> bool:
         return self._use_decay_photons
 
@@ -1390,6 +1422,22 @@ class Settings:
                 subelement = ET.SubElement(element, key)
                 subelement.text = str(value) if key != 'survival_normalization' \
                     else str(value).lower()
+    
+    def _create_forced_collision_subelement(self, root):
+        if self._forced_collision:
+            elem = ET.SubElement(root, "forced_collision")
+
+        if "cells" in self._forced_collision:
+            sub = ET.SubElement(elem, "cells")
+            sub.text = " ".join(str(x) for x in self._forced_collision["cells"])
+
+        if "max_split" in self._forced_collision:
+            sub = ET.SubElement(elem, "max_split")
+            sub.text = str(self._forced_collision["max_split"])
+
+        if "min_weight" in self._forced_collision:
+            sub = ET.SubElement(elem, "min_weight")
+            sub.text = str(self._forced_collision["min_weight"])
 
     def _create_entropy_mesh_subelement(self, root, mesh_memo=None):
         if self.entropy_mesh is None:
@@ -2054,6 +2102,23 @@ class Settings:
                             domains.append(domain)
                         self.random_ray['source_region_meshes'].append((mesh, domains))
 
+    def _forced_collision_from_xml_element(self, root):
+        elem = root.find("forced_collision")
+        if elem is None:
+            return
+        fc = {}
+        text = get_text(elem, "cells")
+        if text is not None:
+            fc["cells"] = [int(x) for x in text.split()]
+        text = get_text(elem, "max_split")
+        if text is not None:
+            fc["max_split"] = int(text)
+        text = get_text(elem, "min_weight")
+        if text is not None:
+            fc["min_weight"] = float(text)
+        if fc:
+            self.forced_collision = fc
+
     def _use_decay_photons_from_xml_element(self, root):
         text = get_text(root, 'use_decay_photons')
         if text is not None:
@@ -2124,6 +2189,7 @@ class Settings:
         self._create_max_history_splits_subelement(element)
         self._create_max_tracks_subelement(element)
         self._create_random_ray_subelement(element, mesh_memo)
+        self._create_forced_collision_subelement(element)  # New
         self._create_use_decay_photons_subelement(element)
 
         # Clean the indentation in the file to be user-readable
@@ -2231,6 +2297,7 @@ class Settings:
         settings._max_history_splits_from_xml_element(elem)
         settings._max_tracks_from_xml_element(elem)
         settings._random_ray_from_xml_element(elem)
+        settings._forced_collision_from_xml_element(elem) # New
         settings._use_decay_photons_from_xml_element(elem)
 
         return settings
