@@ -71,6 +71,27 @@ public:
   void event_collide();
   void event_revive_from_secondary();
   void event_death();
+  
+  // --- Forced-collision helpers (no data members; state stored externally) ---
+  enum class FcBranch : uint8_t { None = 0, UncollidedToBoundary, CollideAtEll };
+
+  // Set directive for THIS particle to go uncollided to the next boundary
+  void fc_set_uncollided_to_boundary() const;
+
+  // Set directive for THIS particle to collide at distance ell (0 < ell < d_boundary)
+  void fc_set_collide_at(double ell) const;
+
+  // Query whether there is a pending directive for THIS particle.
+  // If out params are provided, they are filled.
+  bool fc_pending(FcBranch* out_branch = nullptr, double* out_ell = nullptr) const;
+
+  // Clear any pending directive for THIS particle
+  void fc_clear() const;
+
+  // After calling split(w_new), mark the *last* split child (enqueued on this thread)
+  // to go uncollided to the boundary on its next advance.
+  // (Implemented in particle.cpp using the thread's work queue.)
+  static void fc_mark_last_split_as_uncollided_to_boundary();
 
   //! pulse-height recording
   void pht_collision_energy();

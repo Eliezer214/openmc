@@ -36,6 +36,62 @@
 #include "DagMC.hpp"
 #endif
 
+// --- Forced-collision sidecar state (thread-local) ---
+#include <unordered_map>
+#include <unordered_set>
+#include <cstdint>
+
+namespace {
+
+// Directive kind
+enum class FcBranchKind : uint8_t { None = 0, UncollidedToBoundary, CollideAtEll };
+
+// Directive record
+struct FcDirective {
+  FcBranchKind kind {FcBranchKind::None};
+  double       ell  {0.0};  // valid iff kind == CollideAtEll
+};
+
+// For each thread, map Particle* -> directive
+thread_local std::unordered_map<const openmc::Particle*, FcDirective> t_fc_map;
+
+// Helper to set/clear
+inline void fc_set_for(const openmc::Particle* p, FcBranchKind kind, double ell = 0.0) {
+  if (!p) return;
+  if (kind == FcBranchKind::None) {
+    t_fc_map.erase(p);
+  } else {
+    t_fc_map[p] = FcDirective{kind, ell};
+  }
+}
+
+inline bool fc_get_for(const openmc::Particle* p, FcDirective& out) {
+  if (!p) return false;
+  auto it = t_fc_map.find(p);
+  if (it == t_fc_map.end()) return false;
+  out = it->second;
+  return true;
+}
+
+inline void fc_clear_for(const openmc::Particle* p) {
+  if (!p) return;
+  t_fc_map.erase(p);
+}
+
+// Track the most-recently-split child on this thread (set inside Particle::split)
+thread_local const openmc::SourceSite* t_last_split_bank_site {nullptr};
+
+thread_local std::unordered_set<const openmc::SourceSite*> t_fc_uncollided_sources;
+
+} // anonymous namespace
+
+// --- FC debug helper ---
+static inline bool fc_verbose(const openmc::Particle& p) {
+  // check verbosity or the internal trace flag (if accessible)
+  return openmc::settings::verbosity >= 10 ||
+         const_cast<openmc::Particle&>(p).trace();
+}
+
 namespace openmc {
 
 //==============================================================================
@@ -104,6 +160,9 @@ void Particle::split(double wgt)
   bank.u = u();
   bank.E = settings::run_CE ? E() : g();
   bank.time = time();
+
+   // NEW: expose the just-created SourceSite* so we can mark it as "uncollided"
+  t_last_split_bank_site = &bank;
 }
 
 void Particle::from_source(const SourceSite* src)
@@ -214,6 +273,9 @@ void Particle::event_calculate_xs()
 
 void Particle::event_advance()
 {
+  if (fc_verbose(*this)) {
+    write_message(1, "[FC] DEBUG: entered event_advance()");
+  }
   // Find the distance to the nearest boundary
   boundary() = distance_to_boundary(*this);
 
@@ -225,6 +287,126 @@ void Particle::event_advance()
   } else {
     collision_distance() = -std::log(prn(current_seed())) / macro_xs().total;
   }
+
+  // --- FC one-time settings dump ---
+  {
+    static bool s_fc_dumped = false;
+    if (!s_fc_dumped && fc_verbose(*this)) {
+      s_fc_dumped = true;
+      write_message(1, "[FC] settings: max_split={}, min_weight={:.3e}, cells_count={}",
+                    openmc::settings::forced_collision_max_split,
+                    openmc::settings::forced_collision_min_weight,
+                    openmc::settings::forced_collision_cells.size());
+      //
+      int printed = 0;
+      for (auto const& cid : openmc::settings::forced_collision_cells) {
+        if (printed++ < 50) write_message(1, "    [FC] cell id: {}", cid);
+        else { write_message(1, "    [FC] ... (more cells omitted)"); break; }
+      }
+    }
+  }
+  // --- Consume any pending forced-collision directive for this branch ---
+  {
+    FcBranch branch = FcBranch::None;
+    double ell = 0.0;
+    if (this->fc_pending(&branch, &ell)) {
+      if (fc_verbose(*this)) {
+        write_message(1, "    [FC] pending directive detected: {} (ell={:.6e})",
+                      (branch == FcBranch::UncollidedToBoundary ? "UncollidedToBoundary" :
+                      branch == FcBranch::CollideAtEll ? "CollideAtEll" : "None"),
+                      ell);
+      }
+
+      if (branch == FcBranch::UncollidedToBoundary) {
+        // Guarantee no collision before boundary
+        this->collision_distance() = INFINITY;
+        this->fc_clear();
+      } else if (branch == FcBranch::CollideAtEll) {
+        double d_boundary = this->boundary().distance;
+        constexpr double eps = 1e-12;
+        double ell_clamped = std::min(std::max(ell, eps), d_boundary - eps);
+        this->collision_distance() = ell_clamped;
+        this->fc_clear();
+      } else {
+        this->fc_clear();
+      }
+    }
+  }
+  // --- Forced collision in marked cells (true split) ---
+  do {
+    // Guards
+    if (fc_verbose(*this)) {
+      write_message(1, "[FC] entered FC main block (checking guards)");
+    }
+    if (settings::forced_collision_max_split <= 0) break;
+    if (material() == MATERIAL_VOID) break;
+    if (macro_xs().total <= 0.0) break;
+
+    int32_t cell_index = lowest_coord().cell;
+    if (cell_index == C_NONE) break;
+    int32_t cell_id = model::cells[cell_index]->id_; 
+    if (settings::forced_collision_cells.count(cell_id) == 0) break;
+
+    double d_boundary = boundary().distance;
+    double d_coll_nat = collision_distance();
+    if (d_coll_nat <= d_boundary) break; // natural collision occurs anyway
+
+    // Homogeneous-cell assumption for this step
+    double Sigma_t = macro_xs().total;
+    double Q = std::exp(-Sigma_t * d_boundary); // uncollided prob
+    double P = 1.0 - Q;                          // collided prob
+    if (!(P > 0.0) || !std::isfinite(P)) break;
+
+    // Compute desired branch weights
+    double w  = wgt();
+    double wu = w * Q; // uncollided branch
+    double wc = w * P; // collided branch
+
+    // Respect min_weight: if one branch is too tiny, fall back to unbiased Bernoulli
+    if (settings::forced_collision_min_weight > 0.0 &&
+      (wu < settings::forced_collision_min_weight ||
+        wc < settings::forced_collision_min_weight)) {
+      // Bernoulli fallback (no split; weight stays w)
+      double xi_branch = prn(current_seed());
+      if (xi_branch < P) {
+        // collided: sample ell in [0,d]
+        double xi  = prn(current_seed());
+        double ell = -std::log(1.0 - xi * P) / Sigma_t;
+        constexpr double eps = 1e-12;
+        if (ell <= eps) ell = eps;
+        if (ell >= d_boundary - eps) ell = d_boundary - eps;
+        collision_distance() = ell;
+      } else {
+        // uncollided
+        collision_distance() = INFINITY;
+      }
+      break;
+    }
+
+    // --- Perform true split: create the uncollided clone, and collide this one ---
+
+    // 1) Split off the uncollided clone with weight wu
+    //    Implementation detail: we make split() expose its child via t_last_split_child.
+    t_last_split_bank_site = nullptr;
+    split(wu);                   // creates a child queued on this thread
+    Particle::fc_mark_last_split_as_uncollided_to_boundary(); // mark that child
+
+    // 2) This particle becomes the "collided" branch with weight wc
+    wgt() = wc;
+
+    // Sample truncated exponential for collision site
+    double xi  = prn(current_seed());
+    double ell = -std::log(1.0 - xi * P) / Sigma_t;
+    constexpr double eps = 1e-12;
+    if (ell <= eps) ell = eps;
+    if (ell >= d_boundary - eps) ell = d_boundary - eps;
+
+    // Either set collision_distance now, or leave a directive for the check above
+    // collision_distance() = ell;
+    fc_set_collide_at(ell);
+
+  } while (false);
+  // --- end forced collision block ---
 
   // Select smaller of the two distances
   double distance = std::min(boundary().distance, collision_distance());
@@ -416,7 +598,14 @@ void Particle::event_revive_from_secondary()
     if (secondary_bank().empty())
       return;
 
-    from_source(&secondary_bank().back());
+    //from_source(&secondary_bank().back());
+    
+    const SourceSite* src = &secondary_bank().back();
+    from_source(src);
+    if (t_fc_uncollided_sources.erase(src) > 0) {
+      this->fc_set_uncollided_to_boundary();
+    }
+
     secondary_bank().pop_back();
     n_event() = 0;
     bank_second_E() = 0.0;
@@ -524,6 +713,42 @@ void Particle::pht_secondary_particles()
   if (it != model::pulse_height_cells.end()) {
     int index = std::distance(model::pulse_height_cells.begin(), it);
     pht_storage()[index] -= E();
+  }
+}
+
+// --- Forced-collision helpers (impl) ---
+
+void Particle::fc_set_uncollided_to_boundary() const {
+  fc_set_for(this, FcBranchKind::UncollidedToBoundary);
+}
+
+void Particle::fc_set_collide_at(double ell) const {
+  fc_set_for(this, FcBranchKind::CollideAtEll, ell);
+}
+
+bool Particle::fc_pending(FcBranch* out_branch, double* out_ell) const {
+  FcDirective d;
+  if (!fc_get_for(this, d)) return false;
+  if (out_branch) {
+    switch (d.kind) {
+      case FcBranchKind::UncollidedToBoundary: *out_branch = FcBranch::UncollidedToBoundary; break;
+      case FcBranchKind::CollideAtEll:         *out_branch = FcBranch::CollideAtEll; break;
+      default:                                  *out_branch = FcBranch::None; break;
+    }
+  }
+  if (out_ell) *out_ell = d.ell;
+  return true;
+}
+
+void Particle::fc_clear() const {
+  fc_clear_for(this);
+}
+
+// Mark the child created by the most recent split() call on this thread
+void Particle::fc_mark_last_split_as_uncollided_to_boundary() {
+  if (t_last_split_bank_site) {
+    t_fc_uncollided_sources.insert(t_last_split_bank_site);
+    t_last_split_bank_site = nullptr;
   }
 }
 

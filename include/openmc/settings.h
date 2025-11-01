@@ -160,6 +160,12 @@ extern "C" int verbosity;          //!< How verbose to make output
 extern double weight_cutoff;       //!< Weight cutoff for Russian roulette
 extern double weight_survive;      //!< Survival weight after Russian roulette
 
+// --- Forced-collision parameters (C++ mirror of Python Settings.forced_collision) ---
+extern std::unordered_set<int32_t> forced_collision_cells; //!< Cell IDs where forced collisions are active
+extern int forced_collision_max_split;                      //!< Maximum number of forced-collision branches
+extern double forced_collision_min_weight;                  //!< Minimum allowed weight for forced-collision branches
+
+
 } // namespace settings
 
 //==============================================================================

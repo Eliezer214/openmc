@@ -139,6 +139,11 @@ int verbosity {7};
 double weight_cutoff {0.25};
 double weight_survive {1.0};
 
+// --- Forced-collision parameters (C++ mirror of Python Settings.forced_collision) ---
+std::unordered_set<int32_t> forced_collision_cells;  // set of cell IDs to force collisions in
+int forced_collision_max_split = 0;                  // how many branches (<=2)
+double forced_collision_min_weight = 0.0;            // min weight below which branches killed
+
 } // namespace settings
 
 //==============================================================================
@@ -1008,6 +1013,33 @@ void read_settings_xml(pugi::xml_node root)
     if (check_for_node(node_res_scat, "nuclides")) {
       res_scat_nuclides =
         get_node_array<std::string>(node_res_scat, "nuclides");
+    }
+  }
+
+  // Forced-collision block
+  if (check_for_node(root, "forced_collision")) {
+    auto node_fc = root.child("forced_collision");
+
+    // <cells> as space-separated ints
+    if (check_for_node(node_fc, "cells")) {
+      auto temp = get_node_array<int>(node_fc, "cells");
+      for (auto c : temp) settings::forced_collision_cells.insert(c);
+    }
+
+    if (check_for_node(node_fc, "max_split")) {
+      settings::forced_collision_max_split =
+        std::stoi(get_node_value(node_fc, "max_split"));
+      if (settings::forced_collision_max_split < 0) {
+        fatal_error("<max_split> must be >= 0 in <forced_collision>.");
+      }
+    }
+
+    if (check_for_node(node_fc, "min_weight")) {
+      settings::forced_collision_min_weight =
+        std::stod(get_node_value(node_fc, "min_weight"));
+      if (settings::forced_collision_min_weight < 0.0) {
+        fatal_error("<min_weight> must be >= 0 in <forced_collision>.");
+      }
     }
   }
 
