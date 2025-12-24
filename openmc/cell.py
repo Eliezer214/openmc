@@ -76,6 +76,8 @@ class Cell(IDManagerMixin):
         Density of the cell in [g/cm3]. Multiple densities can be given to give
         each distributed cell instance a unique density. Densities set here will
         override the density set on materials used to fill the cell.
+    force_collision : bool
+        Whether forced collision biasing is applied in this cell.
     translation : Iterable of float
         If the cell is filled with a universe, this array specifies a vector
         that is used to translate (shift) the universe.
@@ -119,6 +121,7 @@ class Cell(IDManagerMixin):
         self._num_instances = None
         self._volume = None
         self._atoms = None
+        self._force_collision = False
 
     def __contains__(self, point):
         if self.region is None:
@@ -286,6 +289,15 @@ class Cell(IDManagerMixin):
                     c._density = density
         else:
             self._density = density
+
+    @property
+    def force_collision(self) -> bool:
+        return self._force_collision
+
+    @force_collision.setter
+    def force_collision(self, force_collision: bool):
+        cv.check_type('cell.force_collision', force_collision, bool)
+        self._force_collision = force_collision
 
     @property
     def translation(self):
@@ -682,6 +694,9 @@ class Cell(IDManagerMixin):
             else:
                 element.set("temperature", str(self.temperature))
 
+        if self.force_collision:
+            element.set("force_collision", "true")
+
         if self.density is not None:
             if isinstance(self.density, Iterable):
                 element.set("density", ' '.join(str(t) for t in self.density))
@@ -755,6 +770,9 @@ class Cell(IDManagerMixin):
         v = get_text(elem, 'volume')
         if v is not None:
             c.volume = float(v)
+        force_collision = get_text(elem, "force_collision")
+        if force_collision is not None:
+            c.force_collision = (force_collision.lower() == "true")
         for key in ('temperature', 'density', 'rotation', 'translation'):
             values = get_elem_list(elem, key, float)
             if values is not None:

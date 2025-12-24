@@ -99,6 +99,8 @@ class Settings:
         history-based parallelism.
 
         .. versionadded:: 0.12
+    force_collision : bool
+        Whether forced collision biasing is enabled.
     free_gas_threshold : float
         Energy multiplier (in units of :math:`kT`) below which the free gas
         scattering treatment is applied for elastic scattering. If not
@@ -388,6 +390,7 @@ class Settings:
 
         self._confidence_intervals = None
         self._electron_treatment = None
+        self._force_collision = None
         self._photon_transport = None
         self._plot_seed = None
         self._ptables = None
@@ -646,6 +649,15 @@ class Settings:
     def ptables(self, ptables: bool):
         cv.check_type('probability tables', ptables, bool)
         self._ptables = ptables
+
+    @property
+    def force_collision(self) -> bool:
+        return self._force_collision
+
+    @force_collision.setter
+    def force_collision(self, force_collision: bool):
+        cv.check_type('force_collision', force_collision, bool)
+        self._force_collision = force_collision
 
     @property
     def photon_transport(self) -> bool:
@@ -1585,6 +1597,11 @@ class Settings:
             element = ET.SubElement(root, "electron_treatment")
             element.text = str(self._electron_treatment)
 
+    def _create_force_collision_subelement(self, root):
+        if self._force_collision is not None:
+            element = ET.SubElement(root, "force_collision")
+            element.text = str(self._force_collision).lower()
+
     def _create_photon_transport_subelement(self, root):
         if self._photon_transport is not None:
             element = ET.SubElement(root, "photon_transport")
@@ -2407,6 +2424,7 @@ class Settings:
         self._create_electron_treatment_subelement(element)
         self._create_energy_mode_subelement(element)
         self._create_max_order_subelement(element)
+        self._create_force_collision_subelement(element)
         self._create_photon_transport_subelement(element)
         self._create_uniform_source_sampling_subelement(element)
         self._create_plot_seed_subelement(element)
