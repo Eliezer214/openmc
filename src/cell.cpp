@@ -356,6 +356,10 @@ CSGCell::CSGCell(pugi::xml_node cell_node)
     name_ = get_node_value(cell_node, "name");
   }
 
+  // Read force collision flag
+  if (cell_node.attribute("force_collision")) {
+    force_collision = cell_node.attribute("force_collision").as_bool();
+  }
   if (check_for_node(cell_node, "universe")) {
     universe_ = std::stoi(get_node_value(cell_node, "universe"));
   } else {

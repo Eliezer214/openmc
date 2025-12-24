@@ -62,6 +62,7 @@ bool output_summary {true};
 bool output_tallies {true};
 bool particle_restart_run {false};
 bool photon_transport {false};
+bool force_collision {false};
 bool reduce_tallies {true};
 bool res_scat_on {false};
 bool restart_run {false};
@@ -603,6 +604,11 @@ void read_settings_xml(pugi::xml_node root)
     }
   }
 
+  // Check for forced collision
+  if (check_for_node(root, "force_collision")) {
+    force_collision = get_node_value_bool(root, "force_collision");
+  }
+  
   // Number of bins for logarithmic grid
   if (check_for_node(root, "log_grid_bins")) {
     n_log_bins = std::stoi(get_node_value(root, "log_grid_bins"));
